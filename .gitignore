@@ -16,6 +16,7 @@ api/vendor
 api/composer.dev.json
 api/composer-install-dev.sh
 api/auth.json
+api/firebase-credentials.json
 api/crontab
 api/go-crond
 api/.fleetbase-id
@@ -55,3 +56,18 @@ builds/osx/frankenphp
 *.dll
 *.so
 *.dylib
+
+# Operational data - must never be published. Contains real customer and
+# driver details from failed notification payloads and webhook deliveries.
+backups/
+webhook-test/payloads.log
+
+# Patched console bundles: multi-megabyte minified vendor files, tied to one
+# specific console image version. The patch procedure is documented in
+# docker-compose.override.example.yml instead.
+console/assets-patch/*.js
+console/assets-patch/engines-dist/
+
+# Stray zero-byte files from a shell redirect
+Fleetbase*Models*
+dynamic:*
