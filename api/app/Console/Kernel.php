@@ -15,6 +15,13 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule)
     {
+        // Order status webhooks give up after ~75 seconds of a receiver being
+        // unreachable. This sweeps up anything abandoned and puts it back on
+        // the queue, so a longer outage self-heals once the endpoint returns.
+        $schedule->command('webhooks:retry-failed --minutes=60')
+                 ->everyTenMinutes()
+                 ->withoutOverlapping();
+
         // $schedule->command('inspire')->hourly();
     }
 

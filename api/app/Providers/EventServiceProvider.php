@@ -2,6 +2,9 @@
 
 namespace App\Providers;
 
+use App\Observers\OrderDestinationObserver;
+use App\Observers\OrderStatusWebhookObserver;
+use Fleetbase\FleetOps\Models\Order;
 use Illuminate\Auth\Events\Registered;
 use Illuminate\Auth\Listeners\SendEmailVerificationNotification;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
@@ -27,6 +30,15 @@ class EventServiceProvider extends ServiceProvider
      */
     public function boot()
     {
-        //
+        // Advance a simple order's destination from pickup to dropoff once the
+        // driver collects the goods. Fleetbase only does this for multi-drop
+        // orders. See App\Observers\OrderDestinationObserver.
+        if (class_exists(Order::class)) {
+            Order::observe(OrderDestinationObserver::class);
+
+            // Reports status transitions to an external endpoint, including the
+            // PREVIOUS status - which Fleetbase's own webhooks cannot provide.
+            Order::observe(OrderStatusWebhookObserver::class);
+        }
     }
 }

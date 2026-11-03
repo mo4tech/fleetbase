@@ -1,0 +1,141 @@
+# EXAMPLE of this deployment's docker-compose.override.yml.
+#
+# The real file is gitignored because it carries database passwords. Copy this
+# to docker-compose.override.yml, fill in every <set-this>, and replace
+# <your-server-ip>.
+#
+# The volume mounts below are what make our fixes active - without them the
+# containers run stock Fleetbase and the fixes are silently absent.
+#
+# After editing api/.env or this file:
+#   docker compose up -d --force-recreate application queue scheduler
+# A plain "up -d" does NOT pick up .env edits.
+
+services:
+  application:
+    # Without this the container stays down after a host reboot: the base
+    # compose file sets no restart policy, so the 16 Oct maintenance reboot
+    # left the API, web server and console stopped while the rest came back.
+    restart: unless-stopped
+    environment:
+      - APP_ENV=production
+      - APP_URL=http://<your-server-ip>:8000
+      - CONSOLE_HOST=http://<your-server-ip>:4200
+      - DATABASE_URL=<set-this>
+      - REDIS_URL=redis://cache:6379
+      - GOOGLE_MAPS_API_KEY=
+      - TWILIO_SID=
+      - TWILIO_TOKEN=
+      - TWILIO_FROM=
+      - OSRM_HOST=https://router.project-osrm.org
+    volumes:
+      - ./api/.env:/fleetbase/api/.env
+      - ./api/app/Observers/OrderDestinationObserver.php:/fleetbase/api/app/Observers/OrderDestinationObserver.php:ro
+      - ./api/app/Providers/EventServiceProvider.php:/fleetbase/api/app/Providers/EventServiceProvider.php:ro
+      - ./api/config/fleetops-destination.php:/fleetbase/api/config/fleetops-destination.php:ro
+      - ./api/app/Console/Commands/BackfillOrderDestination.php:/fleetbase/api/app/Console/Commands/BackfillOrderDestination.php:ro
+      - ./api/app/Observers/OrderStatusWebhookObserver.php:/fleetbase/api/app/Observers/OrderStatusWebhookObserver.php:ro
+      - ./api/app/Jobs/SendOrderStatusWebhook.php:/fleetbase/api/app/Jobs/SendOrderStatusWebhook.php:ro
+      - ./api/config/order-status-webhook.php:/fleetbase/api/config/order-status-webhook.php:ro
+
+  httpd:
+    restart: unless-stopped
+
+  console:
+    restart: unless-stopped
+    environment:
+      - API_HOST=http://<your-server-ip>:8000
+      - SOCKETCLUSTER_HOST=<your-server-ip>
+      - SOCKETCLUSTER_PORT=38000
+      - SOCKETCLUSTER_SECURE=false
+      - SOCKETCLUSTER_PATH=/socketcluster/
+    volumes:
+      - ./console/fleetbase.config.json:/usr/share/nginx/html/fleetbase.config.json
+      # Map tiles: the console bundle hardcodes Carto basemap URLs, which now
+      # require an API key and render "API KEY REQUIRED" over every map. This
+      # is the same bundle with those URLs swapped for OpenStreetMap, which
+      # needs no key. NOTE: the filename carries a content hash - if the
+      # console image is ever updated this mount must be re-made from the new
+      # bundle, or the console will break. See console/assets-patch/.
+      # The maps actually drawn by Fleet-Ops come from the fleetops ENGINE
+      # bundle, not the console vendor bundle. Both are patched.
+      #
+      # The patched engine is published under a NEW content hash so browsers
+      # fetch it as a new file instead of serving the cached Carto version
+      # under the old name. asset-manifest.json points at the new name; the
+      # original engine stays in the image, unreferenced.
+      #
+      # MAP TILES -> OpenStreetMap.
+      #
+      # Fleetbase has no map-provider setting. The Carto tile URLs are literals
+      # in its own source: the default on leaflet-live-map.js, plus five .hbs
+      # templates. A #changeTileSource() method that would accept a custom URL
+      # exists but is never called. So the only option short of rebuilding the
+      # console from source is to replace those literals in the built file.
+      #
+      # ONE file is patched, mounted over its original name. Nothing else is
+      # touched: no index.html, no manifest, no vendor bundle, no integrity
+      # hashes. The fleet-ops map, place/zone/service-area maps all read their
+      # URL from this bundle.
+      #
+      # ON UPGRADE: the console image will ship a new engine filename and this
+      # mount will simply stop applying - maps revert to Carto watermarks, but
+      # NOTHING BREAKS. To restore, copy the new engine out of the container,
+      # replace basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png with
+      # tile.openstreetmap.org/{z}/{x}/{y}.png, and update the path below.
+      # The untouched original is kept in console/assets-patch/engines-dist/.
+      - ./console/assets-patch/engines-dist/engine-a68fd5938b125464fe88dbbc21ee1177.js:/usr/share/nginx/html/engines-dist/@fleetbase/fleetops-engine/assets/engine-a68fd5938b125464fe88dbbc21ee1177.js:ro
+      # Stock nginx sends no Cache-Control for index.html, so browsers cache it
+      # heuristically from its build date and can keep loading superseded
+      # bundles for weeks without asking the server. Not tied to any filename,
+      # so this one survives upgrades.
+      - ./console/assets-patch/nginx-default.conf:/etc/nginx/conf.d/default.conf:ro
+
+  socket:
+    environment:
+      - SOCKETCLUSTER_OPTIONS={"origins":"*:*"}
+
+  queue:
+    environment:
+      - DATABASE_URL=<set-this>
+      - REDIS_URL=redis://cache:6379
+    volumes:
+      - ./api/.env:/fleetbase/api/.env
+      - ./api/app/Observers/OrderDestinationObserver.php:/fleetbase/api/app/Observers/OrderDestinationObserver.php:ro
+      - ./api/app/Providers/EventServiceProvider.php:/fleetbase/api/app/Providers/EventServiceProvider.php:ro
+      - ./api/config/fleetops-destination.php:/fleetbase/api/config/fleetops-destination.php:ro
+      - ./api/app/Console/Commands/BackfillOrderDestination.php:/fleetbase/api/app/Console/Commands/BackfillOrderDestination.php:ro
+      - ./api/app/Observers/OrderStatusWebhookObserver.php:/fleetbase/api/app/Observers/OrderStatusWebhookObserver.php:ro
+      - ./api/app/Jobs/SendOrderStatusWebhook.php:/fleetbase/api/app/Jobs/SendOrderStatusWebhook.php:ro
+      - ./api/config/order-status-webhook.php:/fleetbase/api/config/order-status-webhook.php:ro
+
+  scheduler:
+    environment:
+      - DATABASE_URL=<set-this>
+      - REDIS_URL=redis://cache:6379
+    volumes:
+      - ./api/.env:/fleetbase/api/.env
+      - ./api/app/Observers/OrderDestinationObserver.php:/fleetbase/api/app/Observers/OrderDestinationObserver.php:ro
+      - ./api/app/Providers/EventServiceProvider.php:/fleetbase/api/app/Providers/EventServiceProvider.php:ro
+      - ./api/config/fleetops-destination.php:/fleetbase/api/config/fleetops-destination.php:ro
+      - ./api/app/Console/Commands/BackfillOrderDestination.php:/fleetbase/api/app/Console/Commands/BackfillOrderDestination.php:ro
+      - ./api/app/Observers/OrderStatusWebhookObserver.php:/fleetbase/api/app/Observers/OrderStatusWebhookObserver.php:ro
+      - ./api/app/Jobs/SendOrderStatusWebhook.php:/fleetbase/api/app/Jobs/SendOrderStatusWebhook.php:ro
+      - ./api/config/order-status-webhook.php:/fleetbase/api/config/order-status-webhook.php:ro
+
+  database:
+    environment:
+      - MYSQL_ROOT_PASSWORD=<set-this>
+      - MYSQL_DATABASE=<set-this>
+      - MYSQL_USER=<set-this>
+      - MYSQL_PASSWORD=<set-this>
+    volumes:
+      - fleetbase_db_data:/var/lib/mysql
+
+  cache:
+    volumes:
+      - fleetbase_redis_data:/data
+
+volumes:
+  fleetbase_db_data:
+  fleetbase_redis_data:
