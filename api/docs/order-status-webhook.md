@@ -99,10 +99,17 @@ backend needs the transition rather than the state, it has to remember the
 previous value itself.
 
 **3. A missing `ecom_type` is not `outbound`.** About 5% of orders arrive
-without it — 25 of the 556 created in the seven days to 3 Nov 2026, against
-`source_id` at 556 of 556. Treat those as unknown and do not notify the
+without it — 26 of the 557 created in the seven days to 3 Nov 2026, against
+`source_id` at 557 of 557. Treat those as unknown and do not notify the
 customer, rather than assuming the customer leg — otherwise a delivery to the
 warehouse is announced as a delivery to the customer.
+
+The gap is not random. Every order tagged `meta.source = FourPL` has an
+`ecom_type` (406 of 406 over that window). All 26 without one come from the
+151 orders that carry no `source` or `integration` either, so there is a second
+intake path that sets the field inconsistently — worth closing at the source
+rather than only handling here. `order_31JwuJs`, created 10:18 on 3 Nov, is a
+live example: its whole `meta` is `{cash, source_id, paymentMethod}`.
 
 **4. `completed` is ambiguous on its own.** Both legs end in `completed` with
 identical status codes; `meta.ecom_type` is the only thing that distinguishes
