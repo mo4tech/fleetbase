@@ -99,9 +99,10 @@ backend needs the transition rather than the state, it has to remember the
 previous value itself.
 
 **3. A missing `ecom_type` is not `outbound`.** About 5% of orders arrive
-without it (27 of 535 over the last seven days). Treat those as unknown and do
-not notify the customer, rather than assuming the customer leg — otherwise a
-delivery to the warehouse is announced as a delivery to the customer.
+without it — 25 of the 556 created in the seven days to 3 Nov 2026, against
+`source_id` at 556 of 556. Treat those as unknown and do not notify the
+customer, rather than assuming the customer leg — otherwise a delivery to the
+warehouse is announced as a delivery to the customer.
 
 **4. `completed` is ambiguous on its own.** Both legs end in `completed` with
 identical status codes; `meta.ecom_type` is the only thing that distinguishes
@@ -117,17 +118,33 @@ of two deliveries is newer.
 Each delivery carries a `Signature` header:
 `hash_hmac('sha256', <raw request body>, <secret>)`.
 
-The secret is **not** configurable per endpoint. Fleetbase uses the `api_secret`
-of the session that caused the change, falling back to the literal string
-`internal` (`Listeners/SendResourceLifecycleWebhook.php`, via
-`Support/Auth::setApiKey`). Every delivery observed on this deployment verified
-against `internal`, including ones triggered from the driver app and from the
-integration's API key.
+The secret is **not** configurable per endpoint, and it is not stable. Fleetbase
+signs with `session('api_secret')`, falling back to the literal string
+`internal` (`Listeners/SendResourceLifecycleWebhook.php`). Two things make that
+value unpredictable:
 
-Do not treat that as authentication: `internal` is a constant in Fleetbase's
-source, so anyone can produce a valid signature. Protect the receiving endpoint
-some other way — restrict it to this server's address, or give it its own auth
-and have the backend ignore the header.
+- Which value exists depends on how the change was made. A request through the
+  `v1` API — the driver app and the integration both — ends up with the
+  company's first API credential secret, because `authenticateSanctumToken`
+  resolves one and calls `Auth::setApiKey`. A change made in the console, from
+  the scheduler, or from the CLI has no `api_secret` at all, so it falls back
+  to `internal`.
+- The listener runs on the queue, and `queue:work` does not reset the session
+  between jobs. `setSessionFromEvent` only writes a value that is not already
+  there, so whichever value the worker sees first is reused by every delivery
+  until the worker restarts.
+
+Every delivery observed on this deployment verified against `internal`,
+including ones triggered from the driver app — the worker had latched
+`internal` first. That is luck, not design: restart the queue container in a
+different order of traffic and the same endpoint starts signing with a
+different secret.
+
+Do not treat the header as authentication. `internal` is a constant in
+Fleetbase's source, so when that is the latched value anyone can produce a
+valid signature. Protect the receiving endpoint another way — restrict it to
+this server's address, or give it its own auth and have the backend ignore the
+header.
 
 The custom observer, by contrast, signs with a secret we choose
 (`ORDER_STATUS_WEBHOOK_SECRET`, sent as `X-Signature`).
